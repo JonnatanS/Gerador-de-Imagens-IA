@@ -1,0 +1,7 @@
+{
+  "name": "ImagineAI - Estúdio Criativo",
+  "description": "Uma plataforma intuitiva para gerar e editar imagens incríveis usando inteligência artificial de ponta, permitindo criar variações e adicionar novos elementos às suas criações.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
