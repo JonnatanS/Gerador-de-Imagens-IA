@@ -4,6 +4,7 @@ export interface GeneratedImage {
   url: string;
   prompt: string;
   base64: string;
+  caption?: string;
 }
 
 export enum AppState {
@@ -17,7 +18,18 @@ export enum AppState {
 export type AspectRatio = "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 export type ImageQuality = "Standard" | "HD" | "Ultra";
 export type FileExtension = "png" | "jpg";
-export type FilterType = "None" | "Grayscale" | "Sepia" | "Invert" | "Vintage";
+export type FilterType = 
+  | "None" 
+  | "Grayscale" 
+  | "Sepia" 
+  | "Invert" 
+  | "Vintage" 
+  | "Cyberpunk" 
+  | "Solarize" 
+  | "NightVision" 
+  | "Dramatic" 
+  | "Dreamy" 
+  | "Polaroid";
 
 export interface GenerationConfig {
   aspectRatio: AspectRatio;

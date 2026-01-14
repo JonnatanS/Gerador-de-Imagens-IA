@@ -1,8 +1,9 @@
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { AspectRatio, ImageQuality, FilterType } from "../types";
 
 const MODEL_NAME = 'gemini-2.5-flash-image';
+const TEXT_MODEL = 'gemini-3-flash-preview';
 
 const getQualityModifiers = (quality: ImageQuality): string => {
   switch (quality) {
@@ -26,6 +27,12 @@ const getFilterContext = (filter: FilterType): string => {
     case "Sepia": return "Apply a warm sepia-toned old photograph aesthetic.";
     case "Invert": return "Apply an inverted color negative aesthetic.";
     case "Vintage": return "Apply a vintage film aesthetic with muted colors and classic contrast.";
+    case "Cyberpunk": return "Apply a futuristic cyberpunk aesthetic with neon pink and blue lighting and high contrast.";
+    case "Solarize": return "Apply a solarized effect where colors are partially inverted for a surreal look.";
+    case "NightVision": return "Apply a digital night vision effect with heavy green tint and high sensitivity.";
+    case "Dramatic": return "Apply a dramatic look with deep shadows, high contrast, and slightly desaturated colors.";
+    case "Dreamy": return "Apply a soft, ethereal dreamy look with high brightness, low contrast, and a slight glow.";
+    case "Polaroid": return "Apply a classic instant photo look with warm tones and slight color fading.";
     default: return "";
   }
 };
@@ -38,7 +45,6 @@ export const generateSingleImage = async (
   quality: ImageQuality,
   isRealistic: boolean
 ): Promise<{url: string, base64: string}> => {
-  // Always initialize with process.env.API_KEY directly.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const variationModifiers = [
@@ -91,7 +97,6 @@ export const editImage = async (
   aspectRatio: AspectRatio,
   filter: FilterType
 ): Promise<{url: string, base64: string}> => {
-  // Always initialize with process.env.API_KEY directly.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const filterContext = getFilterContext(filter);
@@ -144,7 +149,6 @@ export const resizeImage = async (
   base64Image: string,
   newAspectRatio: AspectRatio
 ): Promise<{url: string, base64: string}> => {
-  // Always initialize with process.env.API_KEY directly.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const prompt = `Expand and re-compose this image to a ${newAspectRatio} aspect ratio. 
@@ -184,4 +188,40 @@ export const resizeImage = async (
   }
 
   throw new Error("Não foi possível redimensionar a imagem.");
+};
+
+export const applyStyleByDescription = async (description: string): Promise<{
+  filter: FilterType,
+  brightness: number,
+  contrast: number,
+  hue: number,
+  saturation: number
+}> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  const response = await ai.models.generateContent({
+    model: TEXT_MODEL,
+    contents: `Translate the following visual style description into specific technical color grading parameters: "${description}".
+    
+    Choose the closest base filter from this list: ["None", "Grayscale", "Sepia", "Invert", "Vintage", "Cyberpunk", "Solarize", "NightVision", "Dramatic", "Dreamy", "Polaroid"].
+    Then adjust brightness (0-200), contrast (0-200), hue (0-360), and saturation (0-200).
+    
+    Defaults are: filter="None", brightness=100, contrast=100, hue=0, saturation=100.`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          filter: { type: Type.STRING, enum: ["None", "Grayscale", "Sepia", "Invert", "Vintage", "Cyberpunk", "Solarize", "NightVision", "Dramatic", "Dreamy", "Polaroid"] },
+          brightness: { type: Type.NUMBER },
+          contrast: { type: Type.NUMBER },
+          hue: { type: Type.NUMBER },
+          saturation: { type: Type.NUMBER }
+        },
+        required: ["filter", "brightness", "contrast", "hue", "saturation"]
+      }
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
 };
