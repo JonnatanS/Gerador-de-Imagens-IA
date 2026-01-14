@@ -23,4 +23,5 @@ export interface GenerationConfig {
   aspectRatio: AspectRatio;
   quality: ImageQuality;
   extension: FileExtension;
+  isRealistic: boolean;
 }

@@ -13,7 +13,14 @@
         }
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #020617; /* Slate 950 */
+            background-color: #020617; /* Slate 950 fallback */
+            /* Wallpaper abstrato com overlay escuro para legibilidade */
+            background-image: 
+                linear-gradient(rgba(2, 6, 23, 0.85), rgba(2, 6, 23, 0.92)), 
+                url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
             color: #f1f5f9; /* Slate 100 */
             margin: 0;
             overflow-x: hidden;
@@ -23,22 +30,24 @@
             width: 10px;
         }
         ::-webkit-scrollbar-track {
-            background: #020617;
+            background: transparent;
         }
         ::-webkit-scrollbar-thumb {
             background: #1e293b;
             border-radius: 5px;
-            border: 2px solid #020617;
+            border: 2px solid transparent;
+            background-clip: padding-box;
         }
         ::-webkit-scrollbar-thumb:hover {
             background: #334155;
+            background-clip: padding-box;
         }
         
         .glass-panel {
-            background: rgba(15, 23, 42, 0.6);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(51, 65, 85, 0.5);
+            background: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.08);
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
         }
         

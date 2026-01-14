@@ -15,6 +15,11 @@ const getQualityModifiers = (quality: ImageQuality): string => {
   }
 };
 
+const getRealisticModifiers = (isRealistic: boolean): string => {
+  if (!isRealistic) return "";
+  return "photorealistic, raw photo, shot on 35mm lens, f/1.8, depth of field, fujifilm aesthetic, highly detailed skin and fabric textures, natural lighting, masterpiece photography, 8k uhd";
+};
+
 const getFilterContext = (filter: FilterType): string => {
   switch (filter) {
     case "Grayscale": return "Apply a monochromatic black and white aesthetic.";
@@ -30,9 +35,11 @@ export const generateSingleImage = async (
   negativePrompt: string,
   variationIndex: number, 
   aspectRatio: AspectRatio, 
-  quality: ImageQuality
+  quality: ImageQuality,
+  isRealistic: boolean
 ): Promise<{url: string, base64: string}> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Always initialize with process.env.API_KEY directly.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const variationModifiers = [
     "different perspective",
@@ -42,7 +49,12 @@ export const generateSingleImage = async (
   ];
   
   const qualityText = getQualityModifiers(quality);
+  const realismText = getRealisticModifiers(isRealistic);
+  
   let finalPrompt = `${prompt}, ${variationModifiers[variationIndex % variationModifiers.length]}, ${qualityText}`;
+  if (realismText) {
+    finalPrompt += `, ${realismText}`;
+  }
 
   if (negativePrompt.trim()) {
     finalPrompt += `. STRICTLY AVOID and do not include the following in the image: ${negativePrompt}.`;
@@ -79,11 +91,11 @@ export const editImage = async (
   aspectRatio: AspectRatio,
   filter: FilterType
 ): Promise<{url: string, base64: string}> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Always initialize with process.env.API_KEY directly.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const filterContext = getFilterContext(filter);
   
-  // Refined prompt for complex transformations
   const prompt = `Act as an expert image editor. Perform the following transformation on the provided image: "${editInstruction}".
   
   Instructions:
@@ -132,7 +144,8 @@ export const resizeImage = async (
   base64Image: string,
   newAspectRatio: AspectRatio
 ): Promise<{url: string, base64: string}> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Always initialize with process.env.API_KEY directly.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const prompt = `Expand and re-compose this image to a ${newAspectRatio} aspect ratio. 
   Ensure the main subjects are preserved and the background is naturally extended or re-cropped to fill the new frame beautifully. 

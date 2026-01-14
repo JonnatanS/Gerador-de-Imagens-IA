@@ -12,6 +12,39 @@ interface SelectionRect {
   height: number;
 }
 
+// Filter Card Component for visual feedback
+const FilterCard: React.FC<{
+  filter: FilterType;
+  isSelected: boolean;
+  onClick: () => void;
+  previewUrl: string;
+  getFilterString: (f: FilterType) => string;
+}> = ({ filter, isSelected, onClick, previewUrl, getFilterString }) => {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex-shrink-0 flex flex-col items-center gap-2 transition-all p-1.5 rounded-2xl border-2 ${
+        isSelected 
+          ? 'border-indigo-500 bg-indigo-500/10 scale-105 shadow-lg' 
+          : 'border-slate-800 bg-slate-900/40 hover:border-slate-700'
+      }`}
+    >
+      <div className="w-16 h-16 rounded-xl overflow-hidden border border-slate-700">
+        <img 
+          src={previewUrl} 
+          alt={filter} 
+          className="w-full h-full object-cover"
+          style={{ filter: getFilterString(filter) }}
+        />
+      </div>
+      <span className={`text-[10px] font-black uppercase tracking-widest ${isSelected ? 'text-indigo-400' : 'text-slate-500'}`}>
+        {filter === 'None' ? 'Original' : filter}
+      </span>
+    </button>
+  );
+};
+
 // Componente auxiliar para os botões de Formato (Ratio) com miniaturas interativas
 const RatioButton: React.FC<{ 
   ratio: AspectRatio; 
@@ -66,11 +99,20 @@ const App: React.FC = () => {
   const [hue, setHue] = useState(0);
   const [saturation, setSaturation] = useState(100);
   
+  // Feedback Visual states
+  const [isAdjusting, setIsAdjusting] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(false);
+  
   // Estados de Zoom e Navegação
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [initialPanOnDrag, setInitialPanOnDrag] = useState({ x: 0, y: 0 });
+
+  // Configurações de Sensibilidade
+  const [zoomSensitivity, setZoomSensitivity] = useState(1.0);
+  const [panSensitivity, setPanSensitivity] = useState(1.0);
 
   // Estados de Seleção Local
   const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -88,7 +130,8 @@ const App: React.FC = () => {
   const [config, setConfig] = useState<GenerationConfig>({
     aspectRatio: "1:1",
     quality: "HD",
-    extension: "png"
+    extension: "png",
+    isRealistic: false
   });
 
   // Verificar se há alterações visuais pendentes para mostrar o botão de salvar
@@ -125,9 +168,11 @@ const App: React.FC = () => {
     setPanOffset({ x: 0, y: 0 });
     setSelection(null);
     setIsSelectionMode(false);
+    setIsAdjusting(false);
+    setShowOriginal(false);
   }, [selectedImage]);
 
-  const getFilterString = (filter: FilterType, b: number, c: number, h: number, s: number): string => {
+  const getFilterString = (filter: FilterType, b: number = 100, c: number = 100, h: number = 0, s: number = 100): string => {
     let baseFilter = "none";
     switch (filter) {
       case "Grayscale": baseFilter = "grayscale(100%)"; break;
@@ -157,7 +202,7 @@ const App: React.FC = () => {
 
     try {
       const generationPromises = [0, 1, 2].map((i) => 
-        generateSingleImage(prompt, negativePrompt, i, config.aspectRatio, config.quality)
+        generateSingleImage(prompt, negativePrompt, i, config.aspectRatio, config.quality, config.isRealistic)
       );
       const results = await Promise.all(generationPromises);
       
@@ -242,7 +287,8 @@ const App: React.FC = () => {
   const handleSaveEdits = () => {
     if (!selectedImage) return;
     
-    setStatus(AppState.GENERATING);
+    // Usamos o estado de edição para o overlay apropriado
+    setStatus(AppState.EDITING);
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -336,7 +382,7 @@ const App: React.FC = () => {
     if (!selectedImage || !editPrompt.trim()) return;
 
     setError(null);
-    setStatus(AppState.GENERATING);
+    setStatus(AppState.EDITING);
 
     try {
       const result = await editImage(selectedImage.base64, editPrompt, config.aspectRatio, selectedFilter);
@@ -369,7 +415,7 @@ const App: React.FC = () => {
     if (targetResizeRatio === config.aspectRatio) return;
 
     setError(null);
-    setStatus(AppState.GENERATING);
+    setStatus(AppState.EDITING);
 
     try {
       const result = await resizeImage(selectedImage.base64, targetResizeRatio);
@@ -411,21 +457,22 @@ const App: React.FC = () => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleZoom = useCallback((direction: 'in' | 'out') => {
+  const handleZoom = useCallback((direction: 'in' | 'out', customStep?: number) => {
     setZoomScale(prev => {
-      const step = 0.2;
+      const defaultStep = 0.2;
+      const step = customStep ?? (defaultStep * zoomSensitivity);
       const next = direction === 'in' ? prev + step : prev - step;
-      return Math.min(Math.max(next, 0.5), 5);
+      return Math.min(Math.max(next, 0.5), 10);
     });
-  }, []);
+  }, [zoomSensitivity]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
+    if (e.ctrlKey || e.metaKey || isFullScreen) {
       e.preventDefault();
-      const direction = e.deltaY < 0 ? 'in' : 'out';
-      handleZoom(direction);
+      const delta = -e.deltaY * 0.005 * zoomSensitivity;
+      setZoomScale(prev => Math.min(Math.max(prev + delta, 0.5), 10));
     }
-  }, [handleZoom]);
+  }, [zoomSensitivity, isFullScreen]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isSelectionMode) {
@@ -440,7 +487,8 @@ const App: React.FC = () => {
       setSelection({ x, y, width: 0, height: 0 });
     } else if (zoomScale > 1) {
       setIsDragging(true);
-      setDragStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+      setDragStart({ x: e.clientX, y: e.clientY });
+      setInitialPanOnDrag({ x: panOffset.x, y: panOffset.y });
     }
   };
 
@@ -459,9 +507,12 @@ const App: React.FC = () => {
       
       setSelection({ x, y, width, height });
     } else if (isDragging && zoomScale > 1) {
+      const deltaX = (e.clientX - dragStart.x) * panSensitivity;
+      const deltaY = (e.clientY - dragStart.y) * panSensitivity;
+      
       setPanOffset({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y
+        x: initialPanOnDrag.x + deltaX,
+        y: initialPanOnDrag.y + deltaY
       });
     }
   };
@@ -471,6 +522,9 @@ const App: React.FC = () => {
       setIsDrawingSelection(false);
       if (selection && (selection.width < 1 || selection.height < 1)) {
         setSelection(null);
+      } else if (selection) {
+        // Quando termina de desenhar, sai do modo de desenho mas mantém a seleção
+        setIsSelectionMode(false);
       }
     }
     setIsDragging(false);
@@ -483,16 +537,22 @@ const App: React.FC = () => {
 
   const toggleSelectionMode = () => {
     setIsSelectionMode(!isSelectionMode);
-    if (isSelectionMode) {
-      setSelection(null);
-    } else {
+    if (!isSelectionMode) {
+      // Entrando no modo: reseta zoom para facilitar a seleção
       resetZoom();
+      setSelection(null);
     }
   };
 
+  const clearSelection = () => {
+    setSelection(null);
+    setIsSelectionMode(false);
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 selection:bg-indigo-500/30">
-      {status === AppState.GENERATING && <LoadingOverlay />}
+    <div className="min-h-screen bg-transparent text-slate-100 p-4 md:p-8 selection:bg-indigo-500/30">
+      {status === AppState.GENERATING && <LoadingOverlay type="generating" />}
+      {status === AppState.EDITING && <LoadingOverlay type="editing" />}
       
       {isFullScreen && selectedImage && (
         <div 
@@ -509,17 +569,17 @@ const App: React.FC = () => {
           </button>
 
           <div className="absolute top-6 left-6 z-[110] flex flex-col gap-3">
-            <button onClick={() => handleZoom('in')} className="bg-slate-800/80 hover:bg-indigo-600 p-3 rounded-2xl text-white shadow-2xl transition-all hover:scale-105 active:scale-95">
+            <button onClick={() => handleZoom('in')} className="bg-slate-800/80 hover:bg-indigo-600 p-3 rounded-2xl text-white shadow-2xl transition-all hover:scale-105 active:scale-95" title="Zoom In">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
             </button>
-            <button onClick={() => handleZoom('out')} className="bg-slate-800/80 hover:bg-indigo-600 p-3 rounded-2xl text-white shadow-2xl transition-all hover:scale-105 active:scale-95">
+            <button onClick={() => handleZoom('out')} className="bg-slate-800/80 hover:bg-indigo-600 p-3 rounded-2xl text-white shadow-2xl transition-all hover:scale-105 active:scale-95" title="Zoom Out">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
               </svg>
             </button>
-            <button onClick={resetZoom} className="bg-slate-800/80 hover:bg-indigo-600 p-3 rounded-2xl text-white shadow-2xl transition-all hover:scale-105 active:scale-95">
+            <button onClick={resetZoom} className="bg-slate-800/80 hover:bg-indigo-600 p-3 rounded-2xl text-white shadow-2xl transition-all hover:scale-105 active:scale-95" title="Reset Navegação">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
@@ -565,7 +625,7 @@ const App: React.FC = () => {
               <img 
                 src={selectedImage.url} 
                 alt="Local" 
-                className="absolute inset-0 max-w-full max-h-full object-contain pointer-events-none"
+                className={`absolute inset-0 max-w-full max-h-full object-contain pointer-events-none transition-opacity duration-200 ${showOriginal ? 'opacity-0' : 'opacity-100'}`}
                 style={{ 
                   filter: getFilterString(selectedFilter, brightness, contrast, hue, saturation),
                   clipPath: selection ? `inset(${selection.y}% ${100 - (selection.x + selection.width)}% ${100 - (selection.y + selection.height)}% ${selection.x}%)` : 'none'
@@ -607,7 +667,27 @@ const App: React.FC = () => {
             <div className="glass-panel p-10 rounded-[2.5rem] shadow-2xl">
               <form onSubmit={handleGenerate} className="space-y-8">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4">Sua Visão Criativa</label>
+                  <div className="flex justify-between items-center mb-4">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-[0.2em]">Sua Visão Criativa</label>
+                    
+                    {/* Realism Toggle */}
+                    <button 
+                      type="button"
+                      onClick={() => setConfig({...config, isRealistic: !config.isRealistic})}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all ${
+                        config.isRealistic 
+                          ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.2)]' 
+                          : 'bg-slate-900/60 border-slate-700 text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <span className="text-[10px] font-black tracking-widest uppercase">Modo Realista</span>
+                      <div className={`w-3 h-3 rounded-full transition-all ${config.isRealistic ? 'bg-indigo-400 scale-110 shadow-glow' : 'bg-slate-700'}`}></div>
+                    </button>
+                  </div>
                   <textarea
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
@@ -718,7 +798,7 @@ const App: React.FC = () => {
             <div className="space-y-6">
               <div 
                 ref={imageContainerRef}
-                className="relative group overflow-hidden rounded-[2.5rem] shadow-[0_30px_60px_-15px_rgba(0,0,0,0.7)] border border-slate-800 bg-slate-950 flex items-center justify-center" 
+                className={`relative group overflow-hidden rounded-[2.5rem] shadow-[0_30px_60px_-15px_rgba(0,0,0,0.7)] border flex items-center justify-center select-none transition-all duration-300 ${isAdjusting || isSelectionMode ? 'ring-4 ring-indigo-500/40 border-indigo-500/50' : 'border-slate-800 bg-slate-950'}`} 
                 style={{ 
                   aspectRatio: config.aspectRatio.replace(':', '/'), 
                   cursor: isSelectionMode ? 'crosshair' : (zoomScale > 1 ? 'grab' : 'zoom-in') 
@@ -737,35 +817,46 @@ const App: React.FC = () => {
                   style={{ transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})` }}
                 />
 
-                {hasPendingEdits && (
-                  <img 
-                    src={selectedImage.url} 
-                    alt="Filtered" 
-                    className="absolute inset-0 w-full h-full object-contain transition-transform duration-200 pointer-events-none"
-                    style={{ 
-                      filter: getFilterString(selectedFilter, brightness, contrast, hue, saturation),
-                      transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`,
-                      clipPath: selection ? `inset(${selection.y}% ${100 - (selection.x + selection.width)}% ${100 - (selection.y + selection.height)}% ${selection.x}%)` : 'none'
-                    }}
-                  />
-                )}
+                <img 
+                  src={selectedImage.url} 
+                  alt="Filtered" 
+                  className={`absolute inset-0 w-full h-full object-contain transition-transform duration-200 pointer-events-none transition-opacity duration-200 ${showOriginal ? 'opacity-0' : 'opacity-100'}`}
+                  style={{ 
+                    filter: getFilterString(selectedFilter, brightness, contrast, hue, saturation),
+                    transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`,
+                    clipPath: selection ? `inset(${selection.y}% ${100 - (selection.x + selection.width)}% ${100 - (selection.y + selection.height)}% ${selection.x}%)` : 'none'
+                  }}
+                />
 
-                {selection && isSelectionMode && (
+                {selection && (
                   <div 
                     className="absolute border-2 border-dashed border-indigo-400 bg-indigo-500/10 z-20 pointer-events-none"
-                    style={{ left: `${selection.x}%`, top: `${selection.y}%`, width: `${selection.width}%`, height: `${selection.height}%` }}
+                    style={{ 
+                      left: `${selection.x}%`, 
+                      top: `${selection.y}%`, 
+                      width: `${selection.width}%`, 
+                      height: `${selection.height}%` 
+                    }}
                   />
                 )}
                 
                 {isSelectionMode && (
                   <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-indigo-600 text-white px-5 py-2 rounded-full text-xs font-black z-30 shadow-2xl animate-pulse tracking-widest uppercase">
-                    Ferramenta de Seleção Ativa
+                    Desenhe na imagem para selecionar
+                  </div>
+                )}
+
+                {/* Compare Feedback */}
+                {showOriginal && (
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-900/60 backdrop-blur-md px-6 py-3 rounded-2xl border border-slate-700 text-xs font-black tracking-[0.2em] z-40 pointer-events-none">
+                    ORIGINAL
                   </div>
                 )}
 
                 <div className="absolute top-6 left-6 flex flex-col gap-3 z-10 opacity-0 group-hover:opacity-100 transition-all duration-300">
-                   <button onClick={() => handleZoom('in')} className="bg-slate-900/90 hover:bg-indigo-600 text-white p-3 rounded-2xl backdrop-blur-xl shadow-2xl transition-all"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg></button>
-                   <button onClick={() => handleZoom('out')} className="bg-slate-900/90 hover:bg-indigo-600 text-white p-3 rounded-2xl backdrop-blur-xl shadow-2xl transition-all"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M20 12H4" /></svg></button>
+                   <button onClick={() => handleZoom('in')} className="bg-slate-900/90 hover:bg-indigo-600 text-white p-3 rounded-2xl backdrop-blur-xl shadow-2xl transition-all" title="Zoom In"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg></button>
+                   <button onClick={() => handleZoom('out')} className="bg-slate-900/90 hover:bg-indigo-600 text-white p-3 rounded-2xl backdrop-blur-xl shadow-2xl transition-all" title="Zoom Out"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M20 12H4" /></svg></button>
+                   <button onClick={resetZoom} className="bg-slate-900/90 hover:bg-indigo-600 text-white p-3 rounded-2xl backdrop-blur-xl shadow-2xl transition-all" title="Reset Navegação"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button>
                 </div>
 
                 <button onClick={() => setIsFullScreen(true)} className="absolute bottom-6 right-6 bg-slate-900/80 hover:bg-indigo-600 text-white p-4 rounded-2xl backdrop-blur-xl opacity-0 group-hover:opacity-100 transition-all shadow-2xl"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg></button>
@@ -777,21 +868,64 @@ const App: React.FC = () => {
                   </>
                 )}
 
-                <button 
-                  onClick={handleDownload}
-                  className="absolute top-6 right-6 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-2xl font-black text-sm transition-all shadow-2xl active:scale-95 flex items-center gap-2"
-                >
-                  BAIXAR
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                </button>
+                <div className="absolute top-6 right-6 flex gap-3">
+                  <button 
+                    onMouseDown={() => setShowOriginal(true)}
+                    onMouseUp={() => setShowOriginal(false)}
+                    onMouseLeave={() => setShowOriginal(false)}
+                    className={`bg-slate-900/80 hover:bg-slate-800 text-white px-5 py-3 rounded-2xl font-black text-[10px] tracking-widest transition-all shadow-2xl active:scale-95 border border-slate-700/50 ${hasPendingEdits ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                  >
+                    COMPARAÇÃO
+                  </button>
+                  <button 
+                    onClick={handleDownload}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-2xl font-black text-sm transition-all shadow-2xl active:scale-95 flex items-center gap-2"
+                  >
+                    BAIXAR
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  </button>
+                </div>
               </div>
               
               <div className="flex justify-between items-center px-4">
                 <div className="flex items-center gap-3">
-                  <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                  <span className={`w-2 h-2 rounded-full ${hasPendingEdits ? 'bg-indigo-500 animate-pulse' : 'bg-slate-700'}`}></span>
                   <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">{selection ? 'Ajuste Local' : 'Ajuste Global'}</span>
                 </div>
-                <span className="text-xs font-bold text-slate-600 tracking-widest">ZOOM: {Math.round(zoomScale * 100)}%</span>
+                <div className="flex items-center gap-6">
+                   <span className="text-xs font-bold text-slate-600 tracking-widest">OFFSET: {Math.round(panOffset.x)},{Math.round(panOffset.y)}</span>
+                   <span className="text-xs font-bold text-slate-600 tracking-widest">ZOOM: {Math.round(zoomScale * 100)}%</span>
+                </div>
+              </div>
+              
+              {/* Sensibilidade e Configurações de Navegação */}
+              <div className="glass-panel p-6 rounded-[2rem] border border-slate-800 shadow-xl space-y-6">
+                <h3 className="text-sm font-black text-slate-300 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                  Navegação & Sensibilidade
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div>
+                    <div className="flex justify-between mb-2">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase">Sensibilidade Zoom (Scroll)</span>
+                      <span className="text-[10px] font-mono font-bold text-indigo-400">{zoomSensitivity.toFixed(1)}x</span>
+                    </div>
+                    <input type="range" min="0.1" max="5.0" step="0.1" value={zoomSensitivity} onChange={e => setZoomSensitivity(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                  </div>
+                  <div>
+                    <div className="flex justify-between mb-2">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase">Sensibilidade Pan (Arrasto)</span>
+                      <span className="text-[10px] font-mono font-bold text-indigo-400">{panSensitivity.toFixed(1)}x</span>
+                    </div>
+                    <input type="range" min="0.1" max="5.0" step="0.1" value={panSensitivity} onChange={e => setPanSensitivity(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                  </div>
+                </div>
+                <div className="flex gap-4 pt-2">
+                   <button onClick={resetZoom} className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl transition-all text-xs border border-slate-700">RESETAR NAVEGAÇÃO</button>
+                   <button onClick={() => { setZoomSensitivity(1.0); setPanSensitivity(1.0); }} className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl transition-all text-xs border border-slate-700">RESETAR SENSIBILIDADE</button>
+                </div>
               </div>
             </div>
 
@@ -803,50 +937,88 @@ const App: React.FC = () => {
                     Laboratório de Cor
                   </h2>
                   <div className="flex gap-3">
-                    <button onClick={toggleSelectionMode} className={`px-5 py-3 rounded-2xl font-bold text-sm transition-all border ${isSelectionMode ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl' : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:text-white'}`}>
-                      {isSelectionMode ? 'CONCLUIR' : 'MARCAR ÁREA'}
-                    </button>
+                    {selection ? (
+                       <button onClick={clearSelection} className="bg-red-500/10 hover:bg-red-500/20 text-red-400 px-5 py-3 rounded-2xl font-bold text-sm transition-all border border-red-500/30 flex items-center gap-2">
+                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                         LIMPAR ÁREA
+                       </button>
+                    ) : (
+                      <button onClick={toggleSelectionMode} className={`px-5 py-3 rounded-2xl font-bold text-sm transition-all border ${isSelectionMode ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl' : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:text-white'}`}>
+                        {isSelectionMode ? 'CANCELAR' : 'AJUSTE LOCAL'}
+                      </button>
+                    )}
+                    
                     {(hasPendingEdits || selection) && (
-                      <button onClick={handleSaveEdits} className="bg-white text-slate-950 px-6 py-3 rounded-2xl font-black text-sm hover:bg-indigo-50 transition-all shadow-xl">APLICAR</button>
+                      <button onClick={handleSaveEdits} className="bg-white text-slate-950 px-6 py-3 rounded-2xl font-black text-sm hover:bg-indigo-50 transition-all shadow-xl">SALVAR FIXO</button>
                     )}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                  <div className="space-y-6">
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest">Filtro Artístico</label>
-                    <select 
-                      value={selectedFilter}
-                      onChange={(e) => setSelectedFilter(e.target.value as FilterType)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none cursor-pointer focus:ring-4 focus:ring-indigo-500/10 transition-all"
-                    >
-                      <option value="None">Padrão</option>
-                      <option value="Grayscale">Preto & Branco</option>
-                      <option value="Sepia">Sépia Clássico</option>
-                      <option value="Invert">Inverter Negativo</option>
-                      <option value="Vintage">Vintage Film</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-6">
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest">Ajustes Finos</label>
-                    <div className="space-y-6">
-                       {[
-                         { label: 'Brilho', val: brightness, set: setBrightness, min: 0, max: 200, unit: '%' },
-                         { label: 'Contraste', val: contrast, set: setContrast, min: 0, max: 200, unit: '%' },
-                         { label: 'Matiz', val: hue, set: setHue, min: 0, max: 360, unit: '°' },
-                         { label: 'Saturação', val: saturation, set: setSaturation, min: 0, max: 200, unit: '%' }
-                       ].map(s => (
-                         <div key={s.label}>
-                           <div className="flex justify-between mb-2">
-                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{s.label}</span>
-                             <span className="text-[10px] font-mono font-bold text-indigo-400">{s.val}{s.unit}</span>
-                           </div>
-                           <input type="range" min={s.min} max={s.max} value={s.val} onChange={e => s.set(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
-                         </div>
-                       ))}
+                <div className="space-y-10">
+                  {isSelectionMode && !selection ? (
+                    <div className="p-12 border-2 border-dashed border-indigo-500/30 rounded-[2rem] bg-indigo-500/5 flex flex-col items-center justify-center text-center animate-pulse">
+                       <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-indigo-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+                       </svg>
+                       <p className="text-indigo-300 font-bold mb-1 uppercase tracking-widest text-sm">Seletor de Área Ativo</p>
+                       <p className="text-slate-500 text-xs">Clique e arraste sobre a imagem à esquerda para definir uma região.</p>
                     </div>
-                  </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center justify-between">
+                          {selection ? 'Filtro na Seleção' : 'Filtro Artístico Global'}
+                          {selectedFilter !== 'None' && <span className="text-[10px] bg-indigo-500 text-white px-2 py-0.5 rounded-full">ATIVO</span>}
+                        </label>
+                        <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide no-scrollbar">
+                          {(["None", "Grayscale", "Sepia", "Invert", "Vintage"] as FilterType[]).map((f) => (
+                            <FilterCard
+                              key={f}
+                              filter={f}
+                              isSelected={selectedFilter === f}
+                              onClick={() => setSelectedFilter(f)}
+                              previewUrl={selectedImage.url}
+                              getFilterString={getFilterString}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-6">
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center justify-between">
+                          {selection ? 'Ajustes Finos Localizados' : 'Ajustes Finos Globais'}
+                          {isAdjusting && <span className="animate-pulse text-indigo-400">AJUSTANDO...</span>}
+                        </label>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-8">
+                          {[
+                            { label: 'Brilho', val: brightness, set: setBrightness, min: 0, max: 200, unit: '%', def: 100 },
+                            { label: 'Contraste', val: contrast, set: setContrast, min: 0, max: 200, unit: '%', def: 100 },
+                            { label: 'Matiz', val: hue, set: setHue, min: 0, max: 360, unit: '°', def: 0 },
+                            { label: 'Saturação', val: saturation, set: setSaturation, min: 0, max: 200, unit: '%', def: 100 }
+                          ].map(s => (
+                            <div key={s.label}>
+                              <div className="flex justify-between mb-2">
+                                <span className={`text-[10px] font-bold uppercase tracking-tighter ${s.val !== s.def ? 'text-indigo-400' : 'text-slate-500'}`}>{s.label}</span>
+                                <span className={`text-[10px] font-mono font-bold ${s.val !== s.def ? 'text-indigo-300' : 'text-slate-600'}`}>{s.val}{s.unit}</span>
+                              </div>
+                              <input 
+                                type="range" 
+                                min={s.min} 
+                                max={s.max} 
+                                value={s.val} 
+                                onMouseDown={() => setIsAdjusting(true)}
+                                onMouseUp={() => setIsAdjusting(false)}
+                                onTouchStart={() => setIsAdjusting(true)}
+                                onTouchEnd={() => setIsAdjusting(false)}
+                                onChange={e => s.set(parseInt(e.target.value))} 
+                                className={`w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 transition-all ${isAdjusting ? 'scale-y-125' : ''}`} 
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="border-t border-slate-800/50 pt-10">
@@ -854,17 +1026,22 @@ const App: React.FC = () => {
                     <span className="bg-purple-500/20 p-2.5 rounded-2xl"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11l-7-7-7 7M5 19l7-7 7 7" /></svg></span>
                     Inpainting & IA
                   </h3>
+                  <p className="text-slate-500 text-xs mb-6 uppercase tracking-widest">
+                    {selection 
+                      ? "A IA processará apenas a área selecionada acima." 
+                      : "A IA processará a imagem inteira."}
+                  </p>
                   <form onSubmit={handleEdit} className="space-y-6">
                     <input
                       type="text"
                       value={editPrompt}
                       onChange={(e) => setEditPrompt(e.target.value)}
-                      placeholder="Instrução para a IA... ex: 'Adicione óculos escuros'"
+                      placeholder="Instrução para a IA... ex: 'Adicione um boné azul'"
                       className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-5 text-white placeholder:text-slate-600 focus:ring-4 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all"
                     />
                     <div className="flex gap-4">
-                      <button type="submit" disabled={!editPrompt.trim()} className="flex-1 bg-white text-slate-950 font-black py-4 rounded-2xl hover:bg-slate-100 transition-all shadow-xl active:scale-95">REGENERAR ÁREA</button>
-                      <button type="button" onClick={reset} className="px-8 border border-slate-700 hover:bg-slate-900 text-white font-bold rounded-2xl transition-all">LIMPAR</button>
+                      <button type="submit" disabled={!editPrompt.trim()} className="flex-1 bg-white text-slate-950 font-black py-4 rounded-2xl hover:bg-slate-100 transition-all shadow-xl active:scale-95">EXECUTAR IA</button>
+                      <button type="button" onClick={reset} className="px-8 border border-slate-700 hover:bg-slate-900 text-white font-bold rounded-2xl transition-all">LIMPAR TUDO</button>
                     </div>
                   </form>
                 </div>
